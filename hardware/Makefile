@@ -200,7 +200,6 @@ $(veril_library)/V$(veril_top): $(config_file) Makefile ../Bender.yml $(shell fi
   -Wno-UNSIGNED                                                                 \
   -Wno-WIDTH                                                                    \
   -Wno-WIDTHCONCAT                                                              \
-  -Wno-ENUMVALUE                                                                \
   -Wno-COMBDLY                                                                  \
   --hierarchical                                                                \
   tb/verilator/waiver.vlt                                                       \
@@ -253,7 +252,7 @@ dpi: $(buildpath)/$(dpi_library)/ara_dpi.so
 
 $(buildpath)/$(dpi_library)/%.o: tb/dpi/%.cc
 	mkdir -p $(buildpath)/$(dpi_library)
-	$(CXX) -shared -fPIC -std=c++11 -Bsymbolic -c $< -I$(VERILATOR_INCLUDE) -I$(INSTALL_DIR)/riscv-isa-sim/include -o $@
+	$(CXX) -shared -fPIC -std=c++11 -Bsymbolic -c $< -I$(VERILATOR_INCLUDE) -I/home/hjz/riscv-isa-sim/include -o $@
 
 $(buildpath)/$(dpi_library)/ara_dpi.so: $(dpi)
 	mkdir -p $(buildpath)/$(dpi_library)
@@ -263,4 +262,4 @@ $(buildpath)/$(dpi_library)/ara_dpi.so: $(dpi)
 .PHONY: clean
 clean:
 	rm -rf $(buildpath)
-	rm -f  $(BENDER)
+#	rm -f  $(BENDER)

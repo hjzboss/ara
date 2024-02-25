@@ -34,9 +34,9 @@ endif
 include $(ARA_DIR)/config/$(config).mk
 
 INSTALL_DIR             ?= $(ARA_DIR)/install
-GCC_INSTALL_DIR         ?= $(INSTALL_DIR)/riscv-gcc
+GCC_INSTALL_DIR         ?= /home/hjz/riscv/
 LLVM_INSTALL_DIR        ?= $(INSTALL_DIR)/riscv-llvm
-ISA_SIM_INSTALL_DIR     ?= $(INSTALL_DIR)/riscv-isa-sim
+ISA_SIM_INSTALL_DIR     ?= /home/hjz/riscv-isa-sim
 ISA_SIM_MOD_INSTALL_DIR ?= $(INSTALL_DIR)/riscv-isa-sim-mod
 
 RISCV_XLEN    ?= 64
@@ -63,7 +63,8 @@ spike_env_dir ?= $(ARA_DIR)/apps/riscv-tests
 SPIKE_INC     ?= -I$(spike_env_dir)/env -I$(spike_env_dir)/benchmarks/common
 SPIKE_CCFLAGS ?= -DPREALLOCATE=1 -DSPIKE=1 $(SPIKE_INC)
 SPIKE_LDFLAGS ?= -nostdlib -T$(spike_env_dir)/benchmarks/common/test.ld
-RISCV_SIM     ?= $(ISA_SIM_INSTALL_DIR)/bin/spike
+RISCV_SIM     ?= spike
+# TODO: RISCV_SIM_MOD什么东西
 RISCV_SIM_MOD ?= $(ISA_SIM_MOD_INSTALL_DIR)/bin/spike
 # VLEN should be lower or equal than 4096 because of spike restrictions
 vlen_spike := $(shell vlen=$$(grep vlen $(ARA_DIR)/config/$(config).mk | cut -d" " -f3) && echo "$$(( $$vlen < 4096 ? $$vlen : 4096 ))")

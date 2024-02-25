@@ -462,7 +462,9 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
     SwapEndianess        : 1'b0,
     // debug
     DmBaseAddress        : 64'h0,
-    NrPMPEntries         : 0
+    NrPMPEntries         : 0,
+    // TODO: just for simulation
+    UartBaseAddress      : UARTBase
   };
 
 `ifndef TARGET_GATESIM

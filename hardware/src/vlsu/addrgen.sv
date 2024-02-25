@@ -130,6 +130,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
   logic      idx_addr_ready_d, idx_addr_ready_q;
 
   // Break the path from the VRF to the AXI request
+  // note: 类似于一个两项的fifo
   spill_register #(
     .T(elen_t)
   ) i_addrgen_idx_op_spill_reg (
@@ -156,6 +157,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
   // ADDRGEN_IDX_OP: Generates a series of AXI requests from a
   //    vector instruction, but reading a vector of offsets from Ara's lanes.
   //    This is used for scatter and gather operations.
+  // note：单位步长访存和跨步访存直接生成地址，索引访存需要等待lane生成地址
   enum logic [1:0] {
     IDLE,
     ADDRGEN,
@@ -193,7 +195,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
     shuffled_word = addrgen_operand_i;
     // Deshuffle the whole NrLanes * 8 Byte word
     for (int unsigned b = 0; b < 8*NrLanes; b++) begin
-      automatic shortint unsigned b_shuffled = shuffle_index(b, NrLanes, pe_req_q.eew_vs2);
+      automatic shortint unsigned b_shuffled = shuffle_index(b, NrLanes, pe_req_q.eew_vs2); // 获取第b个字节在VRF中的地址，硬编码实现
       deshuffled_word[8*b +: 8] = shuffled_word[8*b_shuffled +: 8];
     end
 
@@ -216,6 +218,7 @@ module addrgen import ara_pkg::*; import rvv_pkg::*; #(
 
           case (pe_req_i.op)
             VLXE, VSXE: begin
+              // 索引访存
               state_d = ADDRGEN_IDX_OP;
 
               // Load element pointers

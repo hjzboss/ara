@@ -1,0 +1,12 @@
+
+==========
+=  FEXP  =
+==========
+
+
+Executing exponential on 128 64-bit data...
+The execution took 0 cycles.
+Executing exponential on 256 32-bit data...
+The execution took 0 cycles.
+Checking results:
+Test result: PASS. No errors found.

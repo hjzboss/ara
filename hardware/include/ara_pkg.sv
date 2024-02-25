@@ -445,7 +445,7 @@ package ara_pkg;
    * to the lane's organization) and deshuffle (lane's organization to the natural
    * packing) functions.
    */
-
+  // note：将顺序索引byte_idx映射到lane中的乱序索引，地址是字节的地址
   function automatic vlen_t shuffle_index(vlen_t byte_idx, int NrLanes, rvv_pkg::vew_e ew);
     // Generate the shuffling of the table above
     unique case (NrLanes)
