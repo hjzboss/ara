@@ -8,6 +8,9 @@
 // register file, in order, and sending them to the corresponding operand
 // queues. This stage also includes the VRF arbiter.
 
+// 负责VRF访问的仲裁，冒险指令的停顿，operand queues请求的生成，访问VRF
+// 当一条指令发射过来时就会向operand queue中的命令buffer申请一个空间，将该指令的操作命令进行存放，进入请求阶段
+// 只有当一条指令访问VRF的请求被仲裁选中时，才会向operabd queues中的数据buffer申请一项空间，等待VRF读取的数据
 module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     parameter  int  unsigned NrLanes = 0,
     parameter  int  unsigned NrBanks = 0,     // Number of banks in the vector register file
@@ -18,6 +21,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     input  logic                                       clk_i,
     input  logic                                       rst_ni,
     // Interface with the main sequencer
+    // 来自主定序器，主定序器每发射一条指令或者完成一条指令都会更新
     input  logic            [NrVInsn-1:0][NrVInsn-1:0] global_hazard_table_i,
     // Interface with the lane sequencer
     input  operand_request_cmd_t [NrOperandQueues-1:0] operand_request_i,
@@ -167,6 +171,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
   //  Stall mechanism  //
   ///////////////////////
 
+  // TODO: 啥意思？
   // To handle any type of stall between vector instructions, we ensure
   // that operands of a second instruction that has a hazard on a first
   // instruction are read at the same rate the results of the second
@@ -174,6 +179,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
   // overtake the first one.
 
   // Instruction wrote a result
+  // 当仲裁成功后会设置对应功能单元的写状态位
   logic [NrVInsn-1:0] vinsn_result_written_d, vinsn_result_written_q;
 
   always_comb begin
@@ -209,6 +215,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
   // A set bit indicates that the the master q is requesting access to the bank b
   // Masters 0 to NrOperandQueues-1 correspond to the operand queues.
   // The remaining four masters correspond to the ALU, the MFPU, the MASKU, the VLDU, and the SLDU.
+  // 为什么还要+5？可能是不能同时读写，只能仲裁一个请求访问bank
   localparam NrMasters = NrOperandQueues + 5;
 
   typedef struct packed {
@@ -262,8 +269,10 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     end
 
     // Did we issue a word to this operand queue?
+    // 只要该队列被仲裁选中了，就需要在operand queue的数据buffer中分配一个条目
     assign operand_issued_o[requester] = |(operand_requester_gnt);
 
+    // 每operand queue都有一个状态机来控制
     always_comb begin: operand_requester
       // Maintain state
       state_d     = state_q;
@@ -280,9 +289,14 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
       operand_queue_cmd_o[requester]       = '0;
       operand_queue_cmd_valid_o[requester] = 1'b0;
 
+      // 当某队列有请求时，并且位于IDLE状态，会向lane sequencer发送对应队列的ack，向operand queues中的控制信号buffer发送信号数据，进入REQUESTING状态
+      // REQUESTING状态首先会更新waw冒险，然后会在operand queue中的数据buffer没有满时向仲裁器发送VRF请求，等待仲裁
+      // 当仲裁选中时会递增访存地址，减少访问次数计数器（有时候一次请求需要读取多次bank），如果访问次数计数器不为0，会继续保持REQUESTING状态，继续访问VRF，
+      // 直到所有元素都读取完毕才会取消仲裁请求，REQUESTING状态在处理完一个读操作时可以继续接受新指令的请求，而不需要重新返回IDLE状态，可以背靠背执行
       case (state_q)
         IDLE: begin
           // Accept a new instruction
+          // 接受一条指令就会在本周期返回ack
           if (operand_request_valid_i[requester]) begin
             state_d                            = REQUESTING;
             // Acknowledge the request
@@ -305,9 +319,11 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
               target_fu: operand_request_i[requester].target_fu,
               is_reduct: operand_request_i[requester].is_reduct
             };
+            // TODO: 为什么？
             // The length should be at least one after the rescaling
             if (operand_queue_cmd_o[requester].vl == '0)
               operand_queue_cmd_o[requester].vl = 1;
+            // 当一条指令发射过来就会向operand queues中的命令buffer申请一项空间，不需要等待仲裁
             operand_queue_cmd_valid_o[requester] = 1'b1;
 
             // Store the request
@@ -343,16 +359,19 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
         end
 
         REQUESTING: begin
+          // 该阶段会向VRF发送请求（如果该指令没有被冒险停顿）
           // Update waw counters
           for (int b = 0; b < NrVInsn; b++)
             if (vinsn_result_written_d[b])
               requester_d.waw_hazard_counter[b] = ~requester_q.waw_hazard_counter[b];
 
+          // 当operand queues中的数据buffer没有满时才会向VRF发送请求，否则会阻塞
           if (operand_queue_ready_i[requester]) begin
             // Bank we are currently requesting
             automatic int bank = requester_q.addr[idx_width(NrBanks)-1:0];
 
             // Operand request
+            // 发送仲裁请求
             operand_req[bank][requester] = !stall;
             operand_payload[requester]   = '{
               addr   : requester_q.addr >> $clog2(NrBanks),
@@ -361,6 +380,8 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
             };
 
             // Received a grant.
+            // 递增地址，减少访问次数计数器
+            // 当还有元素没有读取完时会继续保持REQUESTING状态，继续参与仲裁
             if (|operand_requester_gnt) begin
               // Bump the address pointer
               requester_d.addr = requester_q.addr + 1'b1;

@@ -755,6 +755,11 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
                   6'b001001: ara_req_d.op = ara_pkg::VAND;
                   6'b001010: ara_req_d.op = ara_pkg::VOR;
                   6'b001011: ara_req_d.op = ara_pkg::VXOR;
+                  // update: 新增相邻指令的译码
+                  6'd110000: ara_req_d.op = ara_pkg::VANDADJ;
+                  6'd110001: ara_req_d.op = ara_pkg::VORADJ;
+                  6'd110010: ara_req_d.op = ara_pkg::VADDADJ;
+                  6'd110011: ara_req_d.op = ara_pkg::VHASHADJ;
                   6'b001110: begin
                     ara_req_d.op            = ara_pkg::VSLIDEUP;
                     ara_req_d.stride        = acc_req_i.rs1;

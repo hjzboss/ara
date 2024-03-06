@@ -122,6 +122,8 @@ package ara_pkg;
     VMERGE,
     // Scalar moves to VRF
     VMVSX, VFMVSF,
+    // 相邻指令，都在alu中执行
+    VANDADJ, VORADJ, VADDADJ, VHASHADJ,
     // Integer Reductions
     VREDSUM, VREDAND, VREDOR, VREDXOR, VREDMINU, VREDMIN, VREDMAXU, VREDMAX, VWREDSUMU, VWREDSUM,
     // Mul/Mul-Add

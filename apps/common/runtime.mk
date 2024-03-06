@@ -55,6 +55,18 @@ RISCV_AR      ?= $(RISCV_PREFIX)llvm-ar
 RISCV_LD      ?= $(RISCV_PREFIX)ld.lld
 RISCV_STRIP   ?= $(RISCV_PREFIX)llvm-strip
 
+# Use gcc
+#COMPILER 	   = gcc
+#RISCV_PREFIX  ?= riscv64-unknown-elf-
+#RISCV_CC      ?= $(RISCV_PREFIX)gcc
+#RISCV_CXX     ?= $(RISCV_PREFIX)g++
+#RISCV_OBJDUMP ?= $(RISCV_PREFIX)objdump
+#RISCV_OBJCOPY ?= $(RISCV_PREFIX)objcopy
+#RISCV_AS      ?= $(RISCV_PREFIX)as
+#RISCV_AR      ?= $(RISCV_PREFIX)ar
+#RISCV_LD      ?= $(RISCV_PREFIX)ld
+#RISCV_STRIP   ?= $(RISCV_PREFIX)strip
+
 # Use gcc to compile scalar riscv-tests
 RISCV_CC_GCC  ?= $(GCC_INSTALL_DIR)/bin/$(RISCV_TARGET)-gcc
 
@@ -88,6 +100,8 @@ RISCV_WARNINGS += -Wunused-variable -Wall -Wextra -Wno-unused-command-line-argum
 # LLVM Flags
 LLVM_FLAGS     ?= -march=rv64gcv_zfh_zvfh0p1 -menable-experimental-extensions -mabi=$(RISCV_ABI) -mno-relax -fuse-ld=lld
 LLVM_V_FLAGS   ?= -fno-vectorize -mllvm -scalable-vectorization=off -mllvm -riscv-v-vector-bits-min=0 -Xclang -target-feature -Xclang +no-optimized-zero-stride-load
+#LLVM_FLAGS     ?= -march=rv64gcv_zfh -mabi=$(RISCV_ABI) -mno-relax
+#LLVM_V_FLAGS   ?= 
 RISCV_FLAGS    ?= $(LLVM_FLAGS) $(LLVM_V_FLAGS) -mcmodel=medany -I$(CURDIR)/common -std=gnu99 -O3 -ffast-math -fno-common -fno-builtin-printf $(DEFINES) $(RISCV_WARNINGS)
 RISCV_CCFLAGS  ?= $(RISCV_FLAGS) -ffunction-sections -fdata-sections
 RISCV_CCFLAGS_SPIKE  ?= $(RISCV_FLAGS) $(SPIKE_CCFLAGS) -ffunction-sections -fdata-sections

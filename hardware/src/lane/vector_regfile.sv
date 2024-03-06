@@ -6,6 +6,7 @@
 // Description:
 // This is the vector register file of one lane.
 
+// 读VRF的步骤，第一拍送地址，第二拍读出数据和corssbar到operand queues
 module vector_regfile import ara_pkg::*; #(
     parameter  int  unsigned NrBanks   = 0,     // Number of banks in the vector register file
     parameter  int  unsigned VRFSize   = 0,     // Size of the VRF, in bits
@@ -99,6 +100,7 @@ module vector_regfile import ara_pkg::*; #(
   //  Multiplexer  //
   ///////////////////
 
+  // 在一拍内传输完毕
   stream_xbar #(
     .NumInp   (NrBanks        ),
     .NumOut   (NrOperandQueues),

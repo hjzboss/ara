@@ -1,0 +1,50 @@
+custom instruction test begin!
+dhash test
+dhash pass: rs1=1, rs2=12, rs3=11, ref=9, dut=9
+dhash pass: rs1=2, rs2=2345, rs3=22, ref=4, dut=4
+dhash pass: rs1=44, rs2=4456, rs3=33, ref=0, dut=0
+dhash pass: rs1=0, rs2=446, rs3=34, ref=34, dut=34
+dhash pass: rs1=23, rs2=213, rs3=55, ref=37, dut=37
+dhash pass: rs1=1256, rs2=1, rs3=122, ref=0, dut=0
+dhash end
+mulhash32 test
+mulhash32 pass: rs1=1, rs2=12, rs3=11, ref=0, dut=0
+mulhash32 pass: rs1=2, rs2=2345, rs3=22, ref=4, dut=4
+mulhash32 pass: rs1=44, rs2=4456, rs3=33, ref=0, dut=0
+mulhash32 pass: rs1=0, rs2=446, rs3=34, ref=0, dut=0
+mulhash32 pass: rs1=23, rs2=213, rs3=55, ref=9, dut=9
+mulhash32 pass: rs1=1256, rs2=1, rs3=122, ref=19, dut=19
+mulhash32 end
+crc32 test
+crc32 pass: rs1=1, rs2=12, ref=2125561021, dut=2125561021
+crc32 pass: rs1=2, rs2=2345, ref=2898065737, dut=2898065737
+crc32 pass: rs1=44, rs2=4456, ref=1907459480, dut=1907459480
+crc32 pass: rs1=0, rs2=446, ref=752459402, dut=752459402
+crc32 pass: rs1=23, rs2=213, ref=1969922972, dut=1969922972
+crc32 pass: rs1=1256, rs2=1, ref=3654703836, dut=3654703836
+crc32 end
+vaddadj test
+vaddadj pass: 0, ref=12, dut=12
+vaddadj pass: 1, ref=23, dut=23
+vaddadj pass: 2, ref=45, dut=45
+vaddadj pass: 3, ref=78, dut=78
+vaddadj pass: 4, ref=112, dut=112
+vaddadj pass: 5, ref=167, dut=167
+vaddadj end
+vandadj test
+vandadj pass: 0, ref=18446744073709551615, dut=18446744073709551615
+vandadj pass: 1, ref=11, dut=11
+vandadj pass: 2, ref=2, dut=2
+vandadj pass: 3, ref=0, dut=0
+vandadj pass: 4, ref=0, dut=0
+vandadj pass: 5, ref=0, dut=0
+vandadj end
+voradj test
+voradj pass: 0, ref=61455, dut=61455
+voradj pass: 1, ref=61455, dut=61455
+voradj pass: 2, ref=61471, dut=61471
+voradj pass: 3, ref=61503, dut=61503
+voradj pass: 4, ref=61503, dut=61503
+voradj pass: 5, ref=61503, dut=61503
+voradj end
+custom instruction test end

@@ -1,0 +1,56 @@
+Program header number 0 in `/home/hjz/ara/apps/bin/rv64uv-ara-vsub' low is 80000000
+Program header number 0 in `/home/hjz/ara/apps/bin/rv64uv-ara-vsub' high is 80003217
+Program header number 1 in `/home/hjz/ara/apps/bin/rv64uv-ara-vsub' high is 80003887
+Program header number 2 in `/home/hjz/ara/apps/bin/rv64uv-ara-vsub' high is 80003b07
+Program header number 3 in `/home/hjz/ara/apps/bin/rv64uv-ara-vsub' is not of type PT_LOAD; ignoring.
+Set `ram TOP.ara_tb_verilator.dut.i_ara_soc.i_dram 10 0x80000000 0x100000 write with offset: 0x0 write with size: 0x3b08
+Simulation of Ara
+=================
+
+Tracing can be toggled by sending SIGUSR1 to this process:
+$ kill -USR1 bf7a
+
+Simulation running, end by pressing CTRL-c.
+Checking the results of the test case 1:
+PASSED.
+Checking the results of the test case 2:
+PASSED.
+Checking the results of the test case 3:
+PASSED.
+Checking the results of the test case 4:
+PASSED.
+Checking the results of the test case 5:
+PASSED.
+Checking the results of the test case 6:
+PASSED.
+Checking the results of the test case 7:
+PASSED.
+Checking the results of the test case 8:
+PASSED.
+Checking the results of the test case 9:
+PASSED.
+Checking the results of the test case 10:
+PASSED.
+Checking the results of the test case 11:
+PASSED.
+Checking the results of the test case 12:
+PASSED.
+Checking the results of the test case 13:
+PASSED.
+Checking the results of the test case 14:
+PASSED.
+Checking the results of the test case 15:
+PASSED.
+Checking the results of the test case 16:
+PASSED.
+PASSED: /home/hjz/ara/apps/riscv-tests/isa/rv64uv/vsub.c!
+[hw-cycles]:           0
+[83144] -Info: ara_tb_verilator.sv:49: Assertion failed in TOP.ara_tb_verilator: Core Test *** SUCCESS *** (tohost = 0)
+- /home/hjz/ara/hardware/tb/ara_tb_verilator.sv:52: Verilog $finish
+Received $finish() from Verilog, shutting down simulation.
+
+Simulation statistics
+=====================
+Executed cycles:  a264
+Wallclock time:   26.494 s
+Simulation speed: 1569.11 cycles/s (1.56911 kHz)

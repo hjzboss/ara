@@ -7,6 +7,12 @@
 // Ara's sequencer controls the ordering and the dependencies between the
 // parallel vector instructions in execution.
 
+// dispatch -> main_seq -> lane_seq -> vrf_req可以流水，一周期流出一条指令，背靠背执行指令 
+// 顺序发射，将所有通道看作一个整体功能单元，按照功能单元分类来进行发射，发射出的请求连接到每个pe，由信号中的vfu字段来决定pe是否响应该请求
+// 能发射的指令数取决于每个功能单元的operand queues长度，由main sequencer来判断是否能发射
+// 如果本周期dipatcher发来新指令请求，会在本周起生成新的访问功能单元的请求，记录下此指令的token，会在下一周期将请求发射到对应功能单元，更新各种记分牌和计数器
+// 当一条指令在功能单元中完成时也会在下一周期更新记分牌和功能单元计数器
+// 记分牌包括：指令运行位置的记分牌，指令运行状态的记分牌，指令的冒险记分牌
 module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width; #(
     // RVV Parameters
     parameter  int unsigned NrLanes = 1,          // Number of parallel vector lanes
@@ -30,9 +36,11 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
     output logic              [NrVInsn-1:0] pe_vinsn_running_o,
     input  logic                [NrPEs-1:0] pe_req_ready_i,
     input  pe_resp_t            [NrPEs-1:0] pe_resp_i,
-    input  logic                            alu_vinsn_done_i,
+    //input  logic                            alu_vinsn_done_i,
+    input  logic [NrLanes-1:0]              alu_vinsn_done_i, // update: 此处更改为了接收四条lane的alu信号
     input  logic                            mfpu_vinsn_done_i,
     // Interface with the operand requesters
+    // 发送给operand requester，由其进行指令调度与冒险控制
     output logic [NrVInsn-1:0][NrVInsn-1:0] global_hazard_table_o,
     // Only the slide unit can answer with a scalar response
     input  elen_t                           pe_scalar_resp_i,
@@ -49,6 +57,37 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
   ///////////////////////////////////
 
   // A set bit indicates that the corresponding vector instruction is running at that PE.
+  // 用一个二维表记录并行的指令在哪个pe执行，如下图所示
+  /*
+                                     NrVInsn                                             
+            ┌──────┬──────┬─────┬─────┬────────────────────────────┬─────┐               
+            │      │ insn0│insn1│insn2│      ...                   │insn7│               
+            ├──────┼──────┼─────┼─────┼────────────────────────────┼─────┤               
+            │Lane0 │      │     │     │                            │     │               
+            ├──────┼──────┼─────┼─────┼────────────────────────────┼─────┤               
+            │Lane1 │      │     │     │                            │     │               
+            ├──────┼──────┼─────┼─────┼────────────────────────────┼─────┤               
+            │Lane2 │      │     │     │                            │     │               
+            ├──────┼──────┼─────┼─────┼────────────────────────────┼─────┤               
+            │      │      │     │     │                            │     │               
+            │  .   │      │     │     │                            │     │               
+            │  .   │      │     │     │                            │     │               
+      NrPEs │  .   │      │     │     │                            │     │               
+            │  .   │      │     │     │                            │     │               
+  NrLanes+4 │      │      │     │     │                            │     │               
+            │      │      │     │     │                            │     │               
+            ├──────┼──────┼─────┼─────┼────────────────────────────┼─────┤               
+            │LaneN │      │     │     │                            │     │               
+            ├──────┼──────┼─────┼─────┼────────────────────────────┼─────┤               
+            │ LDU  │      │     │     │                            │     │               
+            ├──────┼──────┼─────┼─────┼────────────────────────────┼─────┤               
+            │STDU  │      │     │     │                            │     │               
+            ├──────┼──────┼─────┼─────┼────────────────────────────┼─────┤               
+            │MASKU │      │     │     │                            │     │               
+            ├──────┼──────┼─────┼─────┼────────────────────────────┼─────┤               
+            │SLDU  │      │     │     │                            │     │               
+            └──────┴──────┴─────┴─────┴────────────────────────────┴─────┘               
+  */
   logic [NrPEs-1:0][NrVInsn-1:0] pe_vinsn_running_d, pe_vinsn_running_q;
 
   // A set bit indicates that the corresponding vector instruction in running somewhere in Ara.
@@ -65,12 +104,14 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
   // Ara is idle if no instruction is currently running on it.
   assign ara_idle_o = !(|vinsn_running_q);
 
+  // 计算出指令的id，实际上是数低位1的个数，相当于找出最低一个0的位置给新指令
   lzc #(.WIDTH(NrVInsn)) i_next_id (
     .in_i   (~vinsn_running_q  ),
     .cnt_o  (vinsn_id_n        ),
     .empty_o(vinsn_running_full)
   );
 
+  // 记录所有正在运行的指令
   always_comb begin: p_vinsn_running
     vinsn_running_d = '0;
     for (int unsigned pe = 0; pe < NrPEs; pe++) vinsn_running_d |= pe_vinsn_running_d[pe];
@@ -95,12 +136,14 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
     end
   end
 
+  // 这样会使得通道0先执行完时，也不能发射后续指令，要等待其他通道全部执行完这条指令才可以接受新的指令
   // Stall the sequencer if the lanes get de-synchronized
   // and lane 0 is no more the last lane to finish the operation.
   // This is because the instruction counters for ALU and MFPU refers
   // to lane 0. If lane 0 finishes before the other lanes, the counter
   // is not reflecting the real lane situations anymore.
   for (genvar i = 0; i < NrVInsn; i++) begin : gen_stall_lane_desynch
+    // 第i条指令没有在通道0执行，但在其他通道执行，进行停顿
     assign stall_lanes_desynch_vec[i] = ~pe_vinsn_running_q[0][i] & |pe_vinsn_running_q_trns[i][NrLanes-1:1];
   end
   assign stall_lanes_desynch = |stall_lanes_desynch_vec;
@@ -128,6 +171,7 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
   //
   // This information is forwarded to the operand requesters of each lane
 
+  // 该表由每条指令中的vs1、vs2、vd、vm的依赖向量相或得出
   logic [NrVInsn-1:0][NrVInsn-1:0] global_hazard_table_d;
 
   /////////////////
@@ -139,6 +183,7 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
 
   // For hazard detection, we need to know which vector instruction is reading/writing to each
   // vector register
+  // 跟踪32个向量寄存器的读写，只跟踪正在运行的指令，即vinsn_running_q中的指令
   typedef struct packed {
     vid_t vid;
     logic valid;
@@ -253,6 +298,9 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
   // Update the token only upon new instructions
   assign ara_req_token_d = (ara_req_valid_i) ? ara_req_i.token : ara_req_token_q;
 
+  // 状态机的转换
+  // 主要部分：冒险检测，计分板设置，pe请求生成，发射指令，寄存器状态跟踪，判断是否能继续接受下一条指令
+  // 当是加载或者存储指令时，需要等待地址转换完成才可以接受下一条派遣指令
   always_comb begin: p_sequencer
     // Default assignments
     state_d               = state_q;
@@ -276,18 +324,22 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
     pe_scalar_resp_ready_o = 1'b0;
 
     // Update vector register's access list
+    // 当指令执行完毕时在下一周期清空其所跟踪的寄存器的读写状态
     for (int unsigned v = 0; v < 32; v++) begin
       read_list_d[v].valid &= vinsn_running_q[read_list_q[v].vid] ;
       write_list_d[v].valid &= vinsn_running_q[write_list_q[v].vid];
     end
 
     // Update the running vector instructions
+    // 当pe中一条指令完成时清空二维表中pe对应指令位
+    // 实际上要比真正写回的时间延一拍
     for (int pe = 0; pe < NrPEs; pe++) pe_vinsn_running_d[pe] &= ~pe_resp_i[pe].vinsn_done;
 
     case (state_q)
       IDLE: begin
         // Sent a request, but the operand requesters are not ready
         // Do not trap here the instructions that do not need any operands at all
+        // 当向pe发送了请求但是pe没有准备好，则状态不变，不再从dispathcer接受新指令
         if (pe_req_valid_o && !(&operand_requester_ready || (is_load(pe_req_o.op) && pe_req_o.vm))) begin
           // Maintain output
           pe_req_d               = pe_req_o;
@@ -299,12 +351,15 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
         end else if (ara_req_valid_i) begin
           // The target PE is ready, and we can handle another running vector instruction
           // Let instructions with priority pass be issued
+          // 要等目标VFU ready，而且所有指令都要保证是通道0先执行完，才可以继续发射新指令
+          // 此处的队列是按VFU分类的，而不是lane和vlsu这些
           if (&vinsn_queue_issue && !stall_lanes_desynch && !vinsn_running_full) begin
             ///////////////
             //  Hazards  //
             ///////////////
 
             // RAW
+            // hazard_vs1记录vs1依赖于哪条指令，根据指令的id来索引，如hazard_vs1[2] = 1说明该指令的vs1的产生依赖于vid=2的指令
             if (ara_req_i.use_vs1) pe_req_d.hazard_vs1[write_list_d[ara_req_i.vs1].vid] |=
               write_list_d[ara_req_i.vs1].valid;
             if (ara_req_i.use_vs2) pe_req_d.hazard_vs2[write_list_d[ara_req_i.vs2].vid] |=
@@ -313,6 +368,7 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
               write_list_d[VMASK].valid;
 
             // WAR
+            // TODO: 为什么hazard_vs1和hazard_vs2设置的位置一样
             if (ara_req_i.use_vd) begin
               pe_req_d.hazard_vs1[read_list_d[ara_req_i.vd].vid] |= read_list_d[ara_req_i.vd].valid;
               pe_req_d.hazard_vs2[read_list_d[ara_req_i.vd].vid] |= read_list_d[ara_req_i.vd].valid;
@@ -384,7 +440,9 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
               // Acknowledge instruction
               ara_req_ready_o = 1'b1;
 
+              // 指令运行状态更新，将对应功能单元的该指令运行状态更新为运行
               // Remember that the vector instruction is running
+              // 是以VFU的视角来进行的划分
               unique case (vfu(ara_req_i.op))
                 VFU_LoadUnit : pe_vinsn_running_d[NrLanes + OffsetLoad][vinsn_id_n]  = 1'b1;
                 VFU_StoreUnit: pe_vinsn_running_d[NrLanes + OffsetStore][vinsn_id_n] = 1'b1;
@@ -393,14 +451,17 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
                 VFU_None     : ;
                 default: for (int l = 0; l < NrLanes; l++)
                     // Instruction is running on the lanes
+                    // 将所有通道看作一个整体功能单元
                     pe_vinsn_running_d[l][vinsn_id_n] = 1'b1;
               endcase
 
               // Masked vector instructions also run on the mask unit
+              // 只要使用了掩码，掩码单元就要标记为运行
               pe_vinsn_running_d[NrLanes + OffsetMask][vinsn_id_n] |= !ara_req_i.vm;
 
               // Some instructions need to wait for an acknowledgment
               // before being committed with Ariane
+              // 当是load store指令时，需要进行地址转换，随后再发送到vldu或者vstu
               if (is_load(ara_req_i.op) || is_store(ara_req_i.op) || !ara_req_i.use_vd) begin
                 ara_req_ready_o = 1'b0;
                 state_d         = WAIT;
@@ -409,6 +470,7 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
               // Issue the instruction
               pe_req_valid_d = 1'b1;
 
+              // 寄存器读写状态更新
               // Mark that this vector instruction is writing to vector vd
               if (ara_req_i.use_vd) write_list_d[ara_req_i.vd] = '{vid: vinsn_id_n, valid: 1'b1};
 
@@ -455,6 +517,7 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
     endcase
 
     // Update the global hazard table
+    // 当一条指令没有在运行时，清除其冒险记录
     for (int id = 0; id < NrVInsn; id++) global_hazard_table_d[id] &= vinsn_running_d;
   end : p_sequencer
 
@@ -518,6 +581,8 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
   // Instructions are registered upon entry by the FUs insn queue counters.
 
   // ALU and MFPU has different signal sources
+  // 当lane0的valu中在第1拍提交指令，第2拍从写回队列中清除，第2拍该信号也会被设置为高
+  //assign insn_queue_done[VFU_Alu]       = 1'b1;
   assign insn_queue_done[VFU_Alu]       = alu_vinsn_done_i;
   assign insn_queue_done[VFU_MFpu]      = mfpu_vinsn_done_i;
   assign insn_queue_done[VFU_LoadUnit]  = |pe_resp_i[NrLanes+OffsetLoad].vinsn_done;
@@ -531,6 +596,7 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
   assign accepted_insn = ara_req_valid_i & (ara_req_token_q != ara_req_i.token);
 
   // The new accepted instruction will not be immediately issued
+  // 一般出现在状态是wait的情况，即等待地址转换的时候接收了新指令
   assign accepted_insn_stalled = accepted_insn & ~ara_req_ready_o;
 
   // Masked instructions do use the mask unit as well
@@ -539,8 +605,60 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
     target_vfus_vec[VFU_MaskUnit] |= ~ara_req_i.vm;
   end
 
+  /*
+  *  update: valu请求解耦合，只要没有lane满，则可以发射，不管四条lane间的执行顺序如何
+  */
+  // 为每个lane新增一个计数器
+  logic [NrLanes-1:0] [idx_width(MaxVInsnQueueDepth + 1)-1:0] insn_queue_cnt_lane_q;
+  logic [NrLanes-1:0] insn_queue_lane_cnt_en, insn_queue_lane_cnt_down, insn_queue_lane_cnt_up;
+  // Each FU has its own ready signal
+  logic [NrLanes-1:0] vinsn_queue_lane_ready;
+  logic [NrLanes-1:0] lane_full_ready; // 每个lane是否接近满了
+  logic [NrLanes-1:0] lane_full; // 是否有lane满了
+
+  // 为每个lane生成一个计数器
+  for (genvar i = 0; i < NrLanes; i++) begin: gen_lane_cnt
+    // The width can be optimized for each counter
+    localparam CNT_WIDTH = idx_width(MaxVInsnQueueDepth + 1);
+
+    counter #(
+        .WIDTH           (CNT_WIDTH),
+        .STICKY_OVERFLOW (0)
+    ) i_insn_queue_cnt (
+        .clk_i           (clk_i                       ),
+        .rst_ni          (rst_ni                      ),
+        .clear_i         (1'b0                        ),
+        .en_i            (insn_queue_lane_cnt_en[i]   ),
+        .load_i          (1'b0                        ),
+        .down_i          (insn_queue_lane_cnt_down[i] ),
+        .d_i             ('0                          ),
+        .q_o             (insn_queue_cnt_lane_q[i]    ),
+        .overflow_o      (                            )
+    );
+
+    assign vinsn_queue_lane_ready[i] = insn_queue_cnt_q[i] < InsnQueueDepth[VFU_Alu];
+    assign insn_queue_lane_cnt_up[i] = accepted_insn & target_vfus_vec[VFU_Alu]; // 只要alu计数器增加，每个lane的计数器就增加
+    assign insn_queue_lane_cnt_down[i] = alu_vinsn_done_i[i]; // 每个lane的计数器单独减少
+    assign insn_queue_lane_cnt_en[i] = insn_queue_lane_cnt_up[i] ^ insn_queue_lane_cnt_down[i];
+    // 用于产生golden_tickets
+    assign lane_full_ready[i] = insn_queue_cnt_lane_q[i] >= (InsnQueueDepth[VFU_Alu] - 1);
+    assign lane_full[i] = insn_queue_cnt_lane_q[i] == InsnQueueDepth[VFU_Alu];
+  end
+  // valu的计数器
+  assign vinsn_queue_ready[VFU_Alu] = &vinsn_queue_lane_ready; // 所有lane都ready才可以向valu发射一条新指令
+  // 只要有一个lane快满了，就赋gold
+  assign gold_ticket_d[VFU_Alu] = accepted_insn_stalled
+                          ? |lane_full_ready & target_vfus_vec[VFU_Alu]
+                          : gold_ticket_q[VFU_Alu];
+  // 只要有一个lane满了，就是优先
+  assign priority_pass[VFU_Alu] = gold_ticket_q[VFU_Alu] & |lane_full & (ara_req_token_q == ara_req_i.token);
+  assign vinsn_queue_issue[VFU_Alu] = ~target_vfus_vec[VFU_Alu] | (vinsn_queue_ready[VFU_Alu] | priority_pass[VFU_Alu]);
+
+
   // One counter per VFU
-  for (genvar i = 0; i < NrVFUs; i++) begin : gen_seq_fu_cnt
+  // 每个VFU发射的指令数更新，VFU发射信号的更新等等
+  // TODO: alu的计数器更改为每一个lane一个，将alu一个计数器替换成了4个计数器
+  for (genvar i = VFU_MFpu; i < NrVFUs; i++) begin : gen_seq_fu_cnt
     // The width can be optimized for each counter
     localparam CNT_WIDTH = idx_width(MaxVInsnQueueDepth + 1);
 
@@ -567,6 +685,10 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
     assign insn_queue_cnt_down[i] = insn_queue_done[i];
     // Don't count if one instruction is issued and one is consumed
     assign insn_queue_cnt_en[i] = insn_queue_cnt_up[i] ^ insn_queue_cnt_down[i];
+    // 当sequencer新接受一条指令但是无法在下一周期将该指令发射（该指令被停顿），
+    // 但是新指令都会让对应的队列计数器在下一周期递增，如果此时计数器离最大差1，会在下一周期将队列标记为满，导致vinsn_queue_ready为假，
+    // 此时即使sequencer已经准备好发射该指令也会被停顿，导致死锁
+    // 因此gold_ticket的作用就是防止被停顿的指令导致的死锁情况
     // Assign the gold ticket when:
     //   1) The new instruction finds the target cnt already full
     //   2) The new instruction is stalled and the target cnt is pre-filled
@@ -577,12 +699,14 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
                             : gold_ticket_q[i];
     // The instructions with a gold ticket can pass the checks even if the cnt is full,
     // but not when (insn_queue_cnt_q[i] == InsnQueueDepth[i] + 1)
-	// Moreover, just arrived instructions cannot use the golden ticket of a previous instruction
+    // Moreover, just arrived instructions cannot use the golden ticket of a previous instruction
     assign priority_pass[i] = gold_ticket_q[i] & (insn_queue_cnt_q[i] == InsnQueueDepth[i]) &
       (ara_req_token_q == ara_req_i.token);
     // The instruction queue [i] allows us to issue the instruction
     // If the insn is not targeting the PE [i], PE [i] cannot stall the instruction issue.
     // Each targeted PE must be ready (either with cnt < MAX or with a priority pass)
+    // vfu的发射信号，当这条指令不使用某功能单元时，该功能单元不能阻止该指令的发射
+    // 如果要使用某个功能单元，需要该功能单元ready或者pass
     assign vinsn_queue_issue[i] = ~target_vfus_vec[i] | (vinsn_queue_ready[i] | priority_pass[i]);
   end
 

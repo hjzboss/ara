@@ -8,6 +8,12 @@
 // instruction within one lane, interfacing with the internal functional units
 // and with the main sequencer.
 
+// 是顺序发射的
+// 不能背靠背发射同一功能单元的指令，两条使用不同功能单元的指令可以背靠背发射，否则要延1拍以上
+// 指令间的冒险operand requester处理调度，sequencer只负责找出指令间的冒险
+// 负责指令的内部发射，接受到一条新指令且与main sequencer握手成功，会在下一周期向operand requester发送操作数请求，operand requester接受到请求就会向操作数队列申请一项空间
+// 同时握手成功在下个时钟沿也会向vfu发送一条新指令，vfu接受到指令信息后就会在指令队列中分配一项空间，无需和vfu握手
+// lane sequencer不负责功能单元的空满判断，只负责发射，lane是否满了由main sequcner判断
 module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width; #(
     parameter int unsigned NrLanes = 0
   ) (
@@ -16,16 +22,16 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
     // Lane ID
     input  logic                 [idx_width(NrLanes)-1:0] lane_id_i,
     // Interface with the main sequencer
-    input  pe_req_t                                       pe_req_i,
+    input  pe_req_t                                       pe_req_i, // 主定序器发送过来的指令请求，包括向量寄存器编号，标量寄存器的值，指令id等等
     input  logic                                          pe_req_valid_i,
-    input  logic                 [NrVInsn-1:0]            pe_vinsn_running_i,
+    input  logic                 [NrVInsn-1:0]            pe_vinsn_running_i, // 指令运行状态，每一位代表指令是否在运行
     output logic                                          pe_req_ready_o,
-    output pe_resp_t                                      pe_resp_o,
+    output pe_resp_t                                      pe_resp_o, // lane sequencer会设置其中的vinsn_done，代表指令执行完的情况，每一位代表该指令是否执行完，这是一个向量
     // Interface with the operand requester
-    output operand_request_cmd_t [NrOperandQueues-1:0]    operand_request_o,
+    output operand_request_cmd_t [NrOperandQueues-1:0]    operand_request_o, // 发射出的指令的操作数信息，会分割给不同的功能单元
     output logic                 [NrOperandQueues-1:0]    operand_request_valid_o,
     input  logic                 [NrOperandQueues-1:0]    operand_request_ready_i,
-    output logic                                          alu_vinsn_done_o,
+    output logic                                          alu_vinsn_done_o, // lane当作功能单元来处理，当alu ready时，该信号需要打一拍后才能传给主定序器
     output logic                                          mfpu_vinsn_done_o,
     // Interface with the lane's VFUs
     output vfu_operation_t                                vfu_operation_o,
@@ -55,6 +61,8 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
   logic    pe_req_valid;
   logic    pe_req_ready;
 
+  // 功能描述：1项的fifo，当fifo为空且输入输出有效，则直接将输入的值转发到输出端口，否则入队
+  // 当发现重复id时不入队，由信号pe_req_valid_i_msk控制
   fall_through_register #(
     .T(pe_req_t)
   ) i_pe_req_register (
@@ -70,6 +78,10 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
     .ready_i   (pe_req_ready      )
   );
 
+  // 当fall_through_register与主定序器握手成功时，会进行：锁存指令id last_id_q、设置同步位en_sync_mask_q，锁存主定序器请求pe_req
+  // 当同步位设置时，每次都会比较last_id和新来的指令的id，避免重复采样，由pe_req_valid_i_msk信号来控制id、同步位和pe_req的锁存
+  // 该信号默认为pe_req_valid_i，即主定序器发来的握手请求
+  // 当没有请求发来时，同步位会设为0
   always_comb begin
     // Default assignment
     last_id_d      = last_id_q;
@@ -119,6 +131,8 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
   operand_request_cmd_t [NrOperandQueues-1:0] operand_request_d;
   logic                 [NrOperandQueues-1:0] operand_request_valid_d;
 
+  // 当push[i]为1，则将operand_request_i[i]放入对应部分，当operand requester中发过来了某一项的ready，则清空该项中对应部分
+  // 这只是fifo中的一项，fifo中的一项分割成了9个部分，包括AluA, AluB, MulFPUA, MulFPUB, MulFPUC, MaskB, MaskM, StA, SlideAddrGenA
   always_comb begin: p_operand_request
     for (int queue = 0; queue < NrOperandQueues; queue++) begin
       // Maintain state
@@ -175,6 +189,8 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
     endcase
   endfunction : vfu_ready
 
+  // 根据发送来的指令功能单元类型，如果fifo entry中对应功能单元的部分是空闲的，则会产生pe_req_ready，提示可以接受下一条指令
+  // 如果lane_sequencer中的fifo entry和fall_through_register握手成功且该指令没有在运行，则计算通道需要计算的次数和操作数相关的信号，并在下一个周期将指令标记为运行
   always_comb begin: sequencer
     // Running loops
     vinsn_running_d = vinsn_running_q & pe_vinsn_running_i;
@@ -197,6 +213,7 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
     vfu_operation_valid_d = 1'b0;
 
     // If the operand requesters are busy, abort the request and wait for another cycle.
+    // 此处不能背靠背执行一条指令？
     if (pe_req_valid) begin
       unique case (pe_req.vfu)
         VFU_Alu : begin
@@ -211,7 +228,7 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
             operand_request_valid_o[MaskM]);
         end
         VFU_LoadUnit : pe_req_ready = !(operand_request_valid_o[MaskM] ||
-            (pe_req_i.op == VLXE && operand_request_valid_o[SlideAddrGenA]));
+            (pe_req_i.op == VLXE && operand_request_valid_o[SlideAddrGenA])); // 索引访存
         VFU_SlideUnit: pe_req_ready = !(operand_request_valid_o[SlideAddrGenA]);
         VFU_StoreUnit: begin
           pe_req_ready = !(operand_request_valid_o[StA] ||
@@ -234,6 +251,7 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
     end
 
     // We received a new vector instruction
+    // 握手成功而且该指令没有在运行，向vfu发送一条指令，向operand requester发送一条操作数请求
     if (pe_req_valid && pe_req_ready && !vinsn_running_d[pe_req.id]) begin
       // Populate the VFU request
       vfu_operation_d = '{
@@ -255,9 +273,11 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
         vtype          : pe_req.vtype,
         default        : '0
       };
+      // 似乎不需要和vfu握手？main sequencer知晓指令队列的剩余空间，因此只要发射到了lane sequencer，就说明指令队列还有空间
       vfu_operation_valid_d = (vfu_operation_d.vfu != VFU_None) ? 1'b1 : 1'b0;
 
       // Vector length calculation
+      // 该通道需要计算的向量元素个数，这里有个除法器？？？
       vfu_operation_d.vl = pe_req.vl / NrLanes;
       // If lane_id_i < vl % NrLanes, this lane has to execute one extra micro-operation.
       if (lane_id_i < pe_req.vl[idx_width(NrLanes)-1:0]) vfu_operation_d.vl += 1;
@@ -270,6 +290,7 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
       // Mark the vector instruction as running
       vinsn_running_d[pe_req.id] = (vfu_operation_d.vfu != VFU_None) ? 1'b1 : 1'b0;
 
+      // 当该通道不需要计算且功能单元是alu或者fpu时，该通道的状态会设定为执行完毕，又可以继续接受其他指令，不会向operand requester发送新的请求
       // Mute request if the instruction runs in the lane and the vl is zero.
       // Exception 1: insn on mask vectors, as MASKU has to receive something from all lanes
       // and the partial results come from VALU and VMFPU.
@@ -413,7 +434,7 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
           // This vector instruction uses masks
           operand_request_i[MaskM] = '{
             id     : pe_req.id,
-            vs     : VMASK,
+            vs     : VMASK, // 掩码寄存器总是0号寄存器
             eew    : pe_req.vtype.vsew,
             vtype  : pe_req.vtype,
             // Since this request goes outside of the lane, we might need to request an

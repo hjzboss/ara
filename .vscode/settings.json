@@ -2,6 +2,14 @@
     "files.associations": {
         "printf.h": "c",
         "stdio.h": "c",
-        "vector_macros.h": "c"
+        "vector_macros.h": "c",
+        "random": "c",
+        "bitset": "c",
+        "forward_list": "c",
+        "future": "c",
+        "list": "c",
+        "regex": "c",
+        "scoped_allocator": "c",
+        "ranges": "c"
     }
 }

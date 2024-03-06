@@ -161,7 +161,8 @@ module ara import ara_pkg::*; #(
     .pe_vinsn_running_o    (pe_vinsn_running         ),
     .pe_req_ready_i        (pe_req_ready             ),
     .pe_resp_i             (pe_resp                  ),
-    .alu_vinsn_done_i      (alu_vinsn_done[0]        ),
+    //.alu_vinsn_done_i      (alu_vinsn_done[0]        ), // 只看第0个lane的完成情况，当lane0完成时就可以发射下一条指令流水化，前提是其他lane都完成了此指令
+    .alu_vinsn_done_i      (alu_vinsn_done           ), // update：此处改为了传入四条lane的alu信号
     .mfpu_vinsn_done_i     (mfpu_vinsn_done[0]       ),
     // Interface with the operand requesters
     .global_hazard_table_o (global_hazard_table      ),

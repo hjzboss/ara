@@ -7,6 +7,10 @@
 // This is Ara's vector ALU. It is capable of executing integer operations
 // in a SIMD fashion, always operating on 64 bits.
 
+// 内部有个指令队列和写回队列，长度都是ValuInsnQueueDepth，与operand queue中的alu操作数长度一致
+// TODO: 当向量长度超过4，向量元素的大小为32时，一个lane内部的元素不是相邻的，无法两周期执行完
+// 解决方案：将相邻指令分为两个阶段，相当于分解为两条微指令，每条微指令可以分开执行，只占据写回队列中的一项，
+//          每条微指令执行一项的计算，每执行完一条微指令，该通道就可以执行指令队列中的其他指令
 module valu import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width; #(
     parameter  int    unsigned NrLanes      = 0,
     // Support for fixed-point data types
@@ -72,6 +76,7 @@ module valu import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width;
   // We store a certain number of in-flight vector instructions
   localparam VInsnQueueDepth = ValuInsnQueueDepth;
 
+  // 向量指令队列
   struct packed {
     vfu_operation_t [VInsnQueueDepth-1:0] vinsn;
 
@@ -125,7 +130,8 @@ module valu import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width;
   //  Result queue  //
   ////////////////////
 
-  localparam int unsigned ResultQueueDepth = 2;
+  // update：更改写回队列的长度为指令队列的长度
+  localparam int unsigned ResultQueueDepth = ValuInsnQueueDepth;
 
   // There is a result queue per VFU, holding the results that were not
   // yet accepted by the corresponding lane.
@@ -329,6 +335,7 @@ module valu import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width;
 
   // Main Alu input MUXes
   // Operands can come from the input queues, from the other lanes, or from the reduction accumulator
+  // 操作数a可能是标量操作数
   assign alu_operand_a  = (alu_state_q inside {INTER_LANES_REDUCTION_RX, SIMD_REDUCTION, INTRA_LANE_REDUCTION} && !first_op_q)
                         ? result_queue_q[result_queue_write_pnt_q].wdata
                         : vinsn_issue_q.use_scalar_op ? scalar_op : alu_operand_i[0];
@@ -394,6 +401,8 @@ module valu import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width;
   // Remaining elements of the current instruction in the commit phase
   vlen_t commit_cnt_d, commit_cnt_q;
 
+  // 主要部分
+  // TODO: 此处需要更改，因为默认一拍执行完常规alu的指令
   always_comb begin: p_valu
     // Maintain state
     vinsn_queue_d = vinsn_queue_q;
@@ -441,14 +450,17 @@ module valu import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width;
     if (vinsn_issue_valid || alu_state_q != NO_REDUCTION) begin
       case (alu_state_q)
         NO_REDUCTION: begin
+          // 当写回队列没有满且不是规约指令，则将指令发射到alu中进行计算，并向操作数队列返回ack，一拍获得结果，在下一拍将结果写入写回队列中，递增写回队列的指针
           // Do not accept operands if the result queue is full!
           // Do not accept operands from this state if the current instruction is a reduction
           if (!result_queue_full && !is_reduction(vinsn_issue_q.op)) begin
             // Do we have all the operands necessary for this instruction?
+            // 检测操作数，需要两个操作数和mask单元都准备完毕
             if ((alu_operand_valid_i[1] || !vinsn_issue_q.use_vs2) &&
                 (alu_operand_valid_i[0] || !vinsn_issue_q.use_vs1) &&
                 (mask_valid_i || vinsn_issue_q.vm)) begin
               // How many elements are we committing with this word?
+              // 求出一个字中元素的数量（一个字64位），当元素宽度为64时，就一个元素，当元素宽度为8时，有1 << (3 - 0)=8个元素，vsew的映射见rvv文档
               automatic logic [3:0] element_cnt = (1 << (int'(EW64) - int'(vinsn_issue_q.vtype.vsew)));
               if (element_cnt > issue_cnt_q)
                 element_cnt = issue_cnt_q;
@@ -464,7 +476,8 @@ module valu import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width;
                 mask_ready_o = !vinsn_issue_q.vm;
 
               // Store the result in the result queue
-              result_queue_d[result_queue_write_pnt_q].wdata = result_queue_q[result_queue_write_pnt_q].wdata | valu_result;
+              // 写回队列
+              result_queue_d[result_queue_write_pnt_q].wdata = result_queue_q[result_queue_write_pnt_q].wdata | valu_result; // 为什么用或操作？
               result_queue_d[result_queue_write_pnt_q].addr  = vaddr(vinsn_issue_q.vd, NrLanes) + ((vinsn_issue_q.vl - issue_cnt_q) >> (int'(EW64) - vinsn_issue_q.vtype.vsew));
               result_queue_d[result_queue_write_pnt_q].id    = vinsn_issue_q.id;
               result_queue_d[result_queue_write_pnt_q].mask  = vinsn_issue_q.vfu == VFU_MaskUnit;
@@ -500,6 +513,8 @@ module valu import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width;
                 end
               end else begin // Normal behavior
                 // Bump pointers and counters of the result queue
+                // 一周期计算完毕？
+                // 写回队列的指针增加，减少需要计算的元素
                 result_queue_valid_d[result_queue_write_pnt_q] = 1'b1;
                 result_queue_cnt_d += 1;
                 if (result_queue_write_pnt_q == ResultQueueDepth-1)
@@ -509,12 +524,14 @@ module valu import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width;
                 issue_cnt_d = issue_cnt_q - element_cnt;
               end
 
+              // 当一条指令在本lane中计算完毕，减少要发射的指令的计数器，递增发射指针指向下一条要发射的指令
               // Finished issuing the micro-operations of this vector instruction
               if (vinsn_issue_valid && issue_cnt_d == '0) begin
                 // Reset the narrowing pointer
                 narrowing_select_d = 1'b0;
 
                 // Bump issue counter and pointers
+                // 将发射指针指向下一条要发射的指令
                 vinsn_queue_d.issue_cnt -= 1;
                 if (vinsn_queue_q.issue_pnt == VInsnQueueDepth-1)
                   vinsn_queue_d.issue_pnt = '0;
@@ -720,6 +737,7 @@ module valu import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width;
     //  Write results into the VRF  //
     //////////////////////////////////
 
+    // NO_REDUCTION阶段会进行写回队列的写回
     alu_result_wdata_o = result_queue_q[result_queue_read_pnt_q].wdata;
     if (alu_state_q == NO_REDUCTION || (alu_state_q == SIMD_REDUCTION && simd_red_cnt_q == simd_red_cnt_max_q)) begin
       alu_result_req_o = result_queue_valid_q[result_queue_read_pnt_q] & ((alu_state_q == SIMD_REDUCTION) || !result_queue_q[result_queue_read_pnt_q].mask);
@@ -736,6 +754,7 @@ module valu import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width;
 
     // Received a grant from the VRF.
     // Deactivate the request.
+    // 向vrf的写回仲裁成功时，下一拍清除写回队列中的选项，递增写回队列读指针，减少计数器
     if (alu_result_gnt_i || mask_operand_gnt) begin
       result_queue_valid_d[result_queue_read_pnt_q] = 1'b0;
       result_queue_d[result_queue_read_pnt_q]       = '0;
@@ -755,16 +774,20 @@ module valu import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width;
     end
 
     // Finished committing the results of a vector instruction
+    // 当该指令的所有数据都已经写回（提交），本周期将该条指令标记为完成，此信号会返回给lane sequencer，下一拍将指令更新为完成（vinsn_done_d），
+    // 随后再返回主定序器，因此主定序器要在此时的下下拍才能将全局表更新为已完成
     if (vinsn_commit_valid && (commit_cnt_d == '0) && !prevent_commit) begin
       // Mark the vector instruction as being done
       alu_vinsn_done_o[vinsn_commit.id] = 1'b1;
 
       // Update the commit counters and pointers
+      // 减少待提交指令的计数器
       vinsn_queue_d.commit_cnt -= 1;
       if (vinsn_queue_d.commit_pnt == VInsnQueueDepth-1) vinsn_queue_d.commit_pnt = '0;
       else vinsn_queue_d.commit_pnt += 1;
 
       // Update the commit counter for the next instruction
+      // 更新提交指针指向下一条待提交指令
       if (vinsn_queue_d.commit_cnt != '0)
         if (!(vinsn_queue_q.vinsn[vinsn_queue_d.commit_pnt].op inside {[VMANDNOT:VMXNOR]}))
           commit_cnt_d = vinsn_queue_q.vinsn[vinsn_queue_d.commit_pnt].vl;
@@ -794,6 +817,7 @@ module valu import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width;
     //  Accept new instruction  //
     //////////////////////////////
 
+    // 当从lane sequencer接收到一条新指令，则在指令队列中分配一项，根据是否是规约指令进行状态转换
     if (!vinsn_queue_full && vfu_operation_valid_i &&
       (vfu_operation_i.vfu == VFU_Alu || vfu_operation_i.op inside {[VMSEQ:VMXNOR]})) begin
       vinsn_queue_d.vinsn[vinsn_queue_q.accept_pnt] = vfu_operation_i;
@@ -812,6 +836,7 @@ module valu import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width;
         reduction_rx_cnt_d      = reduction_rx_cnt_init(NrLanes, lane_id_i);
         sldu_transactions_cnt_d = $clog2(NrLanes) + 1;
 
+        // 发射出的元素数量，即为该通道需要计算的元素个数
         issue_cnt_d = vfu_operation_i.vl;
         if (!(vfu_operation_i.op inside {[VMANDNOT:VMXNOR]}))
           issue_cnt_d = vfu_operation_i.vl;
@@ -831,6 +856,8 @@ module valu import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width;
         end
 
       // Bump pointers and counters of the vector instruction queue
+      // 一条新指令会设置为三种状态同时有
+      // 该指针似乎只会增不会减
       vinsn_queue_d.accept_pnt += 1;
       vinsn_queue_d.issue_cnt += 1;
       vinsn_queue_d.commit_cnt += 1;

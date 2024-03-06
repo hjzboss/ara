@@ -1,0 +1,14 @@
+
+=========
+=  DWT  =
+=========
+
+
+Computing DWT with 512 samples
+Scalar DWT...
+The scalar DWT execution took 0 cycles.
+Vector DWT...
+The vector DWT execution took 0 cycles.
+Max ideal performance is %f, max real performance is %f, actual performance is %f.
+Performance over max real: %f%.
+Test result: PASS. No errors.

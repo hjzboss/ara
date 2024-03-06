@@ -1,0 +1,72 @@
+Program header number 0 in `/home/hjz/ara/apps/bin/rv64uv-ara-vwsubu' low is 80000000
+Program header number 0 in `/home/hjz/ara/apps/bin/rv64uv-ara-vwsubu' high is 80004467
+Program header number 1 in `/home/hjz/ara/apps/bin/rv64uv-ara-vwsubu' high is 80004b47
+Program header number 2 in `/home/hjz/ara/apps/bin/rv64uv-ara-vwsubu' high is 80004d07
+Program header number 3 in `/home/hjz/ara/apps/bin/rv64uv-ara-vwsubu' is not of type PT_LOAD; ignoring.
+Set `ram TOP.ara_tb_verilator.dut.i_ara_soc.i_dram 10 0x80000000 0x100000 write with offset: 0x0 write with size: 0x4d08
+Simulation of Ara
+=================
+
+Tracing can be toggled by sending SIGUSR1 to this process:
+$ kill -USR1 c0a4
+
+Simulation running, end by pressing CTRL-c.
+Checking the results of the test case 1:
+PASSED.
+Checking the results of the test case 2:
+PASSED.
+Checking the results of the test case 3:
+PASSED.
+Checking the results of the test case 4:
+PASSED.
+Checking the results of the test case 5:
+PASSED.
+Checking the results of the test case 6:
+PASSED.
+Checking the results of the test case 7:
+PASSED.
+Checking the results of the test case 8:
+PASSED.
+Checking the results of the test case 9:
+PASSED.
+Checking the results of the test case 10:
+PASSED.
+Checking the results of the test case 11:
+PASSED.
+Checking the results of the test case 12:
+PASSED.
+Checking the results of the test case 13:
+PASSED.
+Checking the results of the test case 14:
+PASSED.
+Checking the results of the test case 15:
+PASSED.
+Checking the results of the test case 16:
+PASSED.
+Checking the results of the test case 17:
+PASSED.
+Checking the results of the test case 18:
+PASSED.
+Checking the results of the test case 19:
+PASSED.
+Checking the results of the test case 20:
+PASSED.
+Checking the results of the test case 21:
+PASSED.
+Checking the results of the test case 22:
+PASSED.
+Checking the results of the test case 23:
+PASSED.
+Checking the results of the test case 24:
+PASSED.
+PASSED: /home/hjz/ara/apps/riscv-tests/isa/rv64uv/vwsubu.c!
+[hw-cycles]:           0
+[122148] -Info: ara_tb_verilator.sv:49: Assertion failed in TOP.ara_tb_verilator: Core Test *** SUCCESS *** (tohost = 0)
+- /home/hjz/ara/hardware/tb/ara_tb_verilator.sv:52: Verilog $finish
+Received $finish() from Verilog, shutting down simulation.
+
+Simulation statistics
+=====================
+Executed cycles:  ee92
+Wallclock time:   41.246 s
+Simulation speed: 1480.73 cycles/s (1.48073 kHz)

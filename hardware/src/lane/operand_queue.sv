@@ -8,6 +8,8 @@
 // by the VRFs. This unit is also able to do widening, for instructions that
 // need it.
 
+// 有两个buffer，一个是命令buffer，一个是数据buffer
+// 顺序fifo
 module operand_queue import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width; #(
     parameter  int           unsigned CmdBufDepth    = 2,
     parameter  int           unsigned DataBufDepth   = 2,

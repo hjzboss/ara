@@ -148,7 +148,7 @@ package rvv_pkg;
     riscv::itype_t i_type; // For CSR instructions
     vmem_type_t vmem_type;
     vamo_type_t vamo_type;
-    varith_type_t varith_type;
+    varith_type_t varith_type; // 向量算术指令类型
     vsetvli_type_t vsetvli_type;
     vsetivli_type_t vsetivli_type;
     vsetvl_type_t vsetvl_type;

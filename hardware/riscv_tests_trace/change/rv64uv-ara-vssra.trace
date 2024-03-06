@@ -1,0 +1,36 @@
+Program header number 0 in `/home/hjz/ara/apps/bin/rv64uv-ara-vssra' low is 80000000
+Program header number 0 in `/home/hjz/ara/apps/bin/rv64uv-ara-vssra' high is 8000164d
+Program header number 1 in `/home/hjz/ara/apps/bin/rv64uv-ara-vssra' high is 80001adf
+Program header number 2 in `/home/hjz/ara/apps/bin/rv64uv-ara-vssra' high is 80001b97
+Program header number 3 in `/home/hjz/ara/apps/bin/rv64uv-ara-vssra' is not of type PT_LOAD; ignoring.
+Set `ram TOP.ara_tb_verilator.dut.i_ara_soc.i_dram 10 0x80000000 0x100000 write with offset: 0x0 write with size: 0x1b98
+Simulation of Ara
+=================
+
+Tracing can be toggled by sending SIGUSR1 to this process:
+$ kill -USR1 bd8a
+
+Simulation running, end by pressing CTRL-c.
+Checking the results of the test case 1:
+PASSED.
+Checking the results of the test case 2:
+PASSED.
+Checking the results of the test case 3:
+PASSED.
+Checking the results of the test case 4:
+PASSED.
+Checking the results of the test case 5:
+PASSED.
+Checking the results of the test case 6:
+PASSED.
+PASSED: /home/hjz/ara/apps/riscv-tests/isa/rv64uv/vssra.c!
+[hw-cycles]:           0
+[31038] -Info: ara_tb_verilator.sv:49: Assertion failed in TOP.ara_tb_verilator: Core Test *** SUCCESS *** (tohost = 0)
+- /home/hjz/ara/hardware/tb/ara_tb_verilator.sv:52: Verilog $finish
+Received $finish() from Verilog, shutting down simulation.
+
+Simulation statistics
+=====================
+Executed cycles:  3c9f
+Wallclock time:   10.875 s
+Simulation speed: 1427.03 cycles/s (1.42703 kHz)

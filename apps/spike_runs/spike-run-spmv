@@ -1,0 +1,17 @@
+
+==========
+=  SpMV  =
+==========
+
+
+
+-------------------------------------------------------------------
+Calculating a (128 x 128) x 128 sparse matrix vector multiplication...
+CSR format with 9830 nozeros: %f density, %f nonzeros per row 
+-------------------------------------------------------------------
+
+calculating ... 
+The execution took 0 cycles.
+The performance is %f FLOP/cycle (%f% utilization) at 29 lanes.
+Verifying ...
+Passed.

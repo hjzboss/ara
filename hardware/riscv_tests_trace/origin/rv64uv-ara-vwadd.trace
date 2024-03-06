@@ -1,0 +1,13 @@
+Program header number 0 in `/home/hjz/ara/apps/bin/rv64uv-ara-vwadd' low is 80000000
+Program header number 0 in `/home/hjz/ara/apps/bin/rv64uv-ara-vwadd' high is 8000439d
+Program header number 1 in `/home/hjz/ara/apps/bin/rv64uv-ara-vwadd' high is 80004a07
+Program header number 2 in `/home/hjz/ara/apps/bin/rv64uv-ara-vwadd' high is 80004c07
+Program header number 3 in `/home/hjz/ara/apps/bin/rv64uv-ara-vwadd' is not of type PT_LOAD; ignoring.
+Set `ram TOP.ara_tb_verilator.dut.i_ara_soc.i_dram 10 0x80000000 0x100000 write with offset: 0x0 write with size: 0x4c08
+Simulation of Ara
+=================
+
+Tracing can be toggled by sending SIGUSR1 to this process:
+$ kill -USR1 c106
+
+Simulation running, end by pressing CTRL-c.
